@@ -1,9 +1,8 @@
-/// copied from one_layer_NN (2018 10 31)
+/// copied from one_layer_NN (2018 11 02)
 /// needs modification
 
 #include <iostream>
 #include <cmath>
-#include <cstring>
 #include <random>
 #include <stdexcept>
 using uint = unsigned int;
@@ -31,13 +30,15 @@ private:
 	static double identity(double x) { return x; }
 	static double sigmoid(double x) { return 1 / (1 + exp(-x)); }
 	static double arctan(double x) { return atan(x); }
+	static double tanhyp(double x) { return tanh(x); }
 	static double relu(double x) { return x > 0 ? x : 0; }
 
 	static double dsigmoid(double x) { double t = sigmoid(x); return t * (1 - t); }
 	static double darctan(double x) { double t = atan(x); return 1 / (t * t + 1); }
+	static double dtanhyp(double x) { double t = tanh(x); return 1 - t * t; }
 	static double drelu(double x) { return x > 0 ? 1 : (x < 0 ? 0 : 0.5); }
 
-	void forward(const Weight &weight, const double *const input, const uint &inputlen, double **output, const uint &outputlen);
+	void forward(const Weight &weight, const double *const input, const uint &inputlen, double **const output, const uint &outputlen);
 	void update(const Weight &weight, const double *const delta);
 
 	class Weight
@@ -51,13 +52,14 @@ private:
 		Weight(const uint &inlen, const uint &outlen, const double &b = 0)
 			:row(inlen + 1), col(outlen), w(new double*[inlen + 1])
 		{
-			std::default_random_engine generator;
+			std::random_device rd;
+			std::mt19937_64 rnd(rd());
 			std::normal_distribution<double> distribution(0, 1);
 			w[0] = new double[outlen]();
 			for (uint i = 1; i <= inlen; i++)
 			{
 				w[i] = new double[outlen];
-				for (uint j = 0; j < outlen; j++) w[i][j] = distribution(generator);
+				for (uint j = 0; j < outlen; j++) w[i][j] = distribution(rnd);
 			}
 		}
 		~Weight()
@@ -72,7 +74,7 @@ private:
 			delete[] w;
 		}
 
-		friend void Network::forward(const Weight &weight, const double *const input, const uint &inputlen, double **output, const uint &outputlen);
+		friend void Network::forward(const Weight &weight, const double *const input, const uint &inputlen, double **const output, const uint &outputlen);
 		friend void Network::update(const Weight &weight, const double *const delta);
 	} weight;
 
@@ -84,6 +86,7 @@ public:
 		Identity,
 		Sigmoid,
 		Arctan,
+		Tanh,
 		Relu,
 	};
 
@@ -108,6 +111,9 @@ public:
 			break;
 		case Arctan:
 			for (uint i = 0; i < output_size; i++) { activationFunction[i] = arctan; dactivationFunction[i] = darctan; }
+			break;
+		case Tanh:
+			for (uint i = 0; i < output_size; i++) { activationFunction[i] = tanhyp; dactivationFunction[i] = dtanhyp; }
 			break;
 		case Relu:
 			for (uint i = 0; i < output_size; i++) { activationFunction[i] = relu; dactivationFunction[i] = drelu; }
@@ -138,6 +144,9 @@ public:
 			case Arctan:
 				activationFunction[i] = arctan; dactivationFunction[i] = darctan;
 				break;
+			case Tanh:
+				activationFunction[i] = tanhyp; dactivationFunction[i] = dtanhyp;
+				break;
 			case Relu:
 				activationFunction[i] = relu; dactivationFunction[i] = drelu;
 				break;
@@ -161,7 +170,7 @@ public:
 
 		if (this->input != nullptr) delete[] this->input;
 		this->input = new double[inlen];
-		for (int i = 0; i < inlen; i++)
+		for (uint i = 0; i < inlen; i++)
 		{
 			this->input[i] = input[i];
 		}
@@ -204,7 +213,7 @@ public:
 	}
 };
 
-inline void Network::forward(const Weight &weight, const double *const input, const uint &inputlen, double **output, const uint &outputlen)
+inline void Network::forward(const Weight &weight, const double *const input, const uint &inputlen, double **const output, const uint &outputlen)
 {
 	if (inputlen + 1 != weight.row || outputlen != weight.col) throw std::runtime_error("Error : different length!");
 
@@ -234,10 +243,6 @@ inline void Network::update(const Weight &weight, const double *const delta)
 	}
 }
 
-///////////////////////////////////////////////////////////////////////////
-///
-///////////////////////////////////////////////////////////////////////////
-
 inline uint pow(uint n)
 {
 	uint x = 1;
@@ -264,16 +269,16 @@ int main()
 {
 	/// input : binary of length n
 	/// output : decimal representation of input
-	const uint n = 2;
+	const uint n = 3;
 	const uint pn = pow(n);
-	Network network(n, n - 1, Network::ActivationType::Relu, 0.2);
+	Network network(n, n - 1, Network::ActivationType::Identity, 0.4);
 	bool b;
 	uint loop = 0;
 	do
 	{
 		std::cout << "Loop " << loop++ << std::endl;
 		b = true;
-		for (int i = 0; i < pn; i++)
+		for (uint i = 0; i < pn; i++)
 		{
 			std::cout << "current(" << i << "): ";
 			double *arr = new double[n];
@@ -282,7 +287,7 @@ int main()
 			int tmp = i;
 			for (int j = 0; j < n - 1; j++)
 			{
-				out[j] = tmp;
+				out[j] = tmp / 8.0;
 				tmp /= 2;
 			}
 			b &= (network.Learn(arr, n, out, n - 1) < 0.0001);
