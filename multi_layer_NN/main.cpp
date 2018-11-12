@@ -5,7 +5,7 @@
 #include <cmath>
 #include <random>
 #include <stdexcept>
-using uint = unsigned int;
+typedef unsigned int uint;
 typedef double(*ActFunc)(double);
 
 class Network
@@ -16,14 +16,18 @@ private:
 	double *input;
 	uint inlen;
 
-	double *z;
+	uint hiddenlen;
+	uint *hiddensize;
+
+	double **z;
+	double **l;
 	double *output;
 	uint outlen;
 
 	double alpha;
 
-	ActFunc *activationFunction;
-	ActFunc *dactivationFunction;
+	ActFunc **activationFunction;
+	ActFunc **dactivationFunction;
 
 	static double zero(double x) { return 0; }
 	static double one(double x) { return 1; }
@@ -49,7 +53,7 @@ private:
 		uint col;
 
 	public:
-		Weight(const uint &inlen, const uint &outlen, const double &b = 0)
+		Weight(const uint &inlen = 0, const uint &outlen = 0, const double &b = 0)
 			:row(inlen + 1), col(outlen), w(new double*[inlen + 1])
 		{
 			std::random_device rd;
@@ -64,19 +68,13 @@ private:
 		}
 		~Weight()
 		{
-			if (w != nullptr)
-			{
-				for (uint i = 0; i < row; i++)
-				{
-					if (w[i] != nullptr) delete[] w[i];
-				}
-			}
+			if (w != nullptr) for (uint i = 0; i < row; i++) if (w[i] != nullptr) delete[] w[i];
 			delete[] w;
 		}
 
 		friend void Network::forward(const Weight &weight, const double *const input, const uint &inputlen, double **const output, const uint &outputlen);
 		friend void Network::update(const Weight &weight, const double *const delta);
-	} weight;
+	} *weight;
 
 public:
 	enum ActivationType
@@ -90,95 +88,150 @@ public:
 		Relu,
 	};
 
-	Network(const uint &input_size, const uint &output_size, ActivationType actType = Zero, const double &alpha = 0.1)
-		: inlen(input_size), outlen(output_size), alpha(alpha), weight(Weight(input_size, output_size)),
-		input(new double[input_size]), z(new double[output_size]), output(new double[output_size]),
-		activationFunction(new ActFunc[output_size]), dactivationFunction(new ActFunc[output_size])
+	Network(const uint &input_size, const uint &hiddenlayercount, const uint &hidden_size, const uint &output_size, ActivationType actType = Zero, const double &alpha = 0.1)
+		: inlen(input_size), hiddenlen(hiddenlayercount), hiddensize(new uint[hiddenlayercount - 1]), outlen(output_size), alpha(alpha), 
+		weight(new Weight[hiddenlayercount]), input(new double[input_size]), z(new double*[hiddenlayercount]), l(new double*[hiddenlayercount - 1]), output(new double[output_size]),
+		activationFunction(new ActFunc*[hiddenlayercount]), dactivationFunction(new ActFunc*[hiddenlayercount])
+		// hidden_size represents the number of layers including output but not input.
+		// hiddensize[hiddenlayercount - 1] should not be used, use output_size instead.
 	{
+		weight[0] = Weight(input_size, hidden_size);
+		hiddensize[0] = hidden_size;
+		for (uint i = 1; i < hiddenlayercount - 1; i++) { weight[i] = Weight(hidden_size, hidden_size); hiddensize[i] = hidden_size; }
+		weight[hiddenlayercount - 1] = Weight(hidden_size, output_size);
+		hiddensize[hiddenlayercount - 1] = output_size;
+		for (uint i = 0; i < hiddenlayercount - 1; i++)
+		{
+			z[i] = new double[hidden_size];
+			l[i] = new double[hidden_size];
+			activationFunction[i] = new ActFunc[hidden_size];
+			dactivationFunction[i] = new ActFunc[hidden_size];
+		}
+		z[hiddenlayercount - 1] = new double[output_size];
+		activationFunction[hiddenlayercount - 1] = new ActFunc[output_size];
+		dactivationFunction[hiddenlayercount - 1] = new ActFunc[output_size];
 		switch (actType)
 		{
 		case Zero:
-			for (uint i = 0; i < output_size; i++) { activationFunction[i] = zero; dactivationFunction[i] = zero; }
+			for (uint i = 0; i < hiddenlayercount - 1; i++) for (uint j = 0; j < hidden_size; j++) { activationFunction[i][j] = zero; dactivationFunction[i][j] = zero; }
+			for (uint i = 0; i < hidden_size; i++) { activationFunction[hiddenlayercount - 1][i] = zero; dactivationFunction[hiddenlayercount - 1][i] = zero; }
 			break;
 		case One:
-			for (uint i = 0; i < output_size; i++) { activationFunction[i] = one; dactivationFunction[i] = zero; }
+			for (uint i = 0; i < hiddenlayercount - 1; i++) for (uint j = 0; j < hidden_size; j++) { activationFunction[i][j] = one; dactivationFunction[i][j] = zero; }
+			for (uint i = 0; i < hidden_size; i++) { activationFunction[hiddenlayercount - 1][i] = one; dactivationFunction[hiddenlayercount - 1][i] = zero; }
 			break;
 		case Identity:
-			for (uint i = 0; i < output_size; i++) { activationFunction[i] = identity; dactivationFunction[i] = one; }
+			for (uint i = 0; i < hiddenlayercount - 1; i++) for (uint j = 0; j < hidden_size; j++) { activationFunction[i][j] = identity; dactivationFunction[i][j] = one; }
+			for (uint i = 0; i < hidden_size; i++) { activationFunction[hiddenlayercount - 1][i] = identity; dactivationFunction[hiddenlayercount - 1][i] = one; }
 			break;
 		case Sigmoid:
-			for (uint i = 0; i < output_size; i++) { activationFunction[i] = sigmoid; dactivationFunction[i] = dsigmoid; }
+			for (uint i = 0; i < hiddenlayercount - 1; i++) for (uint j = 0; j < hidden_size; j++) { activationFunction[i][j] = sigmoid; dactivationFunction[i][j] = dsigmoid; }
+			for (uint i = 0; i < hidden_size; i++) { activationFunction[hiddenlayercount - 1][i] = sigmoid; dactivationFunction[hiddenlayercount - 1][i] = dsigmoid; }
 			break;
 		case Arctan:
-			for (uint i = 0; i < output_size; i++) { activationFunction[i] = arctan; dactivationFunction[i] = darctan; }
+			for (uint i = 0; i < hiddenlayercount - 1; i++) for (uint j = 0; j < hidden_size; j++) { activationFunction[i][j] = arctan; dactivationFunction[i][j] = darctan; }
+			for (uint i = 0; i < hidden_size; i++) { activationFunction[hiddenlayercount - 1][i] = arctan; dactivationFunction[hiddenlayercount - 1][i] = darctan; }
 			break;
 		case Tanh:
-			for (uint i = 0; i < output_size; i++) { activationFunction[i] = tanhyp; dactivationFunction[i] = dtanhyp; }
+			for (uint i = 0; i < hiddenlayercount - 1; i++) for (uint j = 0; j < hidden_size; j++) { activationFunction[i][j] = tanhyp; dactivationFunction[i][j] = dtanhyp; }
+			for (uint i = 0; i < hidden_size; i++) { activationFunction[hiddenlayercount - 1][i] = tanhyp; dactivationFunction[hiddenlayercount - 1][i] = dtanhyp; }
 			break;
 		case Relu:
-			for (uint i = 0; i < output_size; i++) { activationFunction[i] = relu; dactivationFunction[i] = drelu; }
+			for (uint i = 0; i < hiddenlayercount - 1; i++) for (uint j = 0; j < hidden_size; j++) { activationFunction[i][j] = relu; dactivationFunction[i][j] = drelu; }
+			for (uint i = 0; i < hidden_size; i++) { activationFunction[hiddenlayercount - 1][i] = relu; dactivationFunction[hiddenlayercount - 1][i] = drelu; }
 			break;
 		}
 	}
-	Network(const uint &input_size, const uint &output_size, const ActivationType *const actType, const double &alpha = 0.1)
-		: inlen(input_size), outlen(output_size), alpha(alpha), weight(Weight(input_size, output_size)),
-		input(new double[input_size]), z(new double[output_size]), output(new double[output_size]),
-		activationFunction(new ActFunc[output_size]), dactivationFunction(new ActFunc[output_size])
+	Network(const uint &input_size, const uint &hiddenlayercount, const uint *hidden_size, const uint &output_size, const ActivationType **const actType, const double &alpha = 0.1)
+		: inlen(input_size), hiddenlen(hiddenlayercount), hiddensize(new uint[hiddenlayercount - 1]), outlen(output_size), alpha(alpha),
+		weight(new Weight[hiddenlayercount]), input(new double[input_size]), z(new double*[hiddenlayercount]), l(new double*[hiddenlayercount - 1]), output(new double[output_size]),
+		activationFunction(new ActFunc*[hiddenlayercount]), dactivationFunction(new ActFunc*[hiddenlayercount])
+		// hidden_size represents the number of layers including output but not input.
+		// hiddensize[hiddenlayercount - 1] should not be used, use output_size instead.
 	{
-		for (uint i = 0; i < output_size; i++)
+		weight[0] = Weight(input_size, hidden_size[0]);
+		for (uint i = 1; i < hiddenlayercount - 1; i++) { weight[i] = Weight(hidden_size[i - 1], hidden_size[i]); hiddensize[i] = hidden_size[i]; }
+		weight[hiddenlayercount - 1] = Weight(hidden_size[hiddenlayercount - 2], output_size);
+		hiddensize[hiddenlayercount - 1] = output_size;
+		for (uint i = 0; i < hiddenlayercount - 1; i++)
 		{
-			switch (actType[i])
+			z[i] = new double[hidden_size[i]];
+			l[i] = new double[hidden_size[i]];
+			activationFunction[i] = new ActFunc[hidden_size[i]];
+			dactivationFunction[i] = new ActFunc[hidden_size[i]];
+		}
+		z[hiddenlayercount - 1] = new double[output_size];
+		activationFunction[hiddenlayercount - 1] = new ActFunc[output_size];
+		dactivationFunction[hiddenlayercount - 1] = new ActFunc[output_size];
+		for (uint i = 0; i < hiddenlayercount - 1; i++)
+		{
+			for (uint j = 0; j < hidden_size[i]; j++)
 			{
-			case Zero:
-				activationFunction[i] = zero; dactivationFunction[i] = zero;
-				break;
-			case One:
-				activationFunction[i] = one; dactivationFunction[i] = zero;
-				break;
-			case Identity:
-				activationFunction[i] = identity; dactivationFunction[i] = one;
-				break;
-			case Sigmoid:
-				activationFunction[i] = sigmoid; dactivationFunction[i] = dsigmoid;
-				break;
-			case Arctan:
-				activationFunction[i] = arctan; dactivationFunction[i] = darctan;
-				break;
-			case Tanh:
-				activationFunction[i] = tanhyp; dactivationFunction[i] = dtanhyp;
-				break;
-			case Relu:
-				activationFunction[i] = relu; dactivationFunction[i] = drelu;
-				break;
+				switch (actType[i][j])
+				{
+				case Zero:
+					activationFunction[i][j] = zero; dactivationFunction[i][j] = zero;
+					break;
+				case One:
+					activationFunction[i][j] = one; dactivationFunction[i][j] = zero;
+					break;
+				case Identity:
+					activationFunction[i][j] = identity; dactivationFunction[i][j] = one;
+					break;
+				case Sigmoid:
+					activationFunction[i][j] = sigmoid; dactivationFunction[i][j] = dsigmoid;
+					break;
+				case Arctan:
+					activationFunction[i][j] = arctan; dactivationFunction[i][j] = darctan;
+					break;
+				case Tanh:
+					activationFunction[i][j] = tanhyp; dactivationFunction[i][j] = dtanhyp;
+					break;
+				case Relu:
+					activationFunction[i][j] = relu; dactivationFunction[i][j] = drelu;
+					break;
+				}
 			}
 		}
 	}
 	~Network()
 	{
 		if (input != nullptr) delete[] input;
-		if (z != nullptr) delete[] z;
+		if (z != nullptr) { for (uint i = 0; i < hiddenlen; i++) { if (z[i] != nullptr) delete[] z[i]; } delete[] z; }
+		if (hiddensize != 0) delete[] hiddensize;
 		if (output != nullptr) delete[] output;
-		if (activationFunction != nullptr) delete[] activationFunction;
-		if (dactivationFunction != nullptr) delete[] dactivationFunction;
+		if (activationFunction != nullptr) { for (uint i = 0; i < hiddenlen; i++) { if (activationFunction[i] != nullptr) delete[] activationFunction[i]; } delete[] activationFunction; }
+		if (dactivationFunction != nullptr) { for (uint i = 0; i < hiddenlen; i++) { if (dactivationFunction[i] != nullptr) delete[] dactivationFunction[i]; } delete[] dactivationFunction; }
+		if (weight != nullptr) delete[] weight;
 	}
 
 	void ForwardPropagation(const double *const input, const uint &inputlen)
 	{
 		if (inputlen != inlen) throw std::runtime_error("Error : different length!");
 
-		/// bad way of initializing, needs optimization
-
-		if (this->input != nullptr) delete[] this->input;
-		this->input = new double[inlen];
 		for (uint i = 0; i < inlen; i++)
 		{
 			this->input[i] = input[i];
 		}
+		forward(this->weight[0], input, inputlen, &this->z[0], this->hiddensize[0]);
+		for (uint i = 0; i < hiddensize[0]; i++)
+		{
+			l[0][i] = activationFunction[0][i](this->z[0][i]);
+		}
 
-		forward(this->weight, input, inputlen, &this->z, outlen);
+		for (uint i = 1; i < hiddenlen - 1; i++)
+		{
+			forward(this->weight[i - 1], this->l[i - 1], this->hiddensize[i - 1], &this->z[i], this->hiddensize[i]);
+			for (uint j = 0; j < hiddensize[i]; j++)
+			{
+				l[i][j] = activationFunction[i][j](this->z[i][j]);
+			}
+		}
+
+		forward(this->weight[hiddenlen - 2], this->l[hiddenlen - 2], hiddensize[hiddenlen - 2], &this->z[hiddenlen - 1], outlen);
 		for (uint i = 0; i < outlen; i++)
 		{
-			output[i] = activationFunction[i](this->z[i]);
+			output[i] = activationFunction[hiddenlen - 1][i](this->z[hiddenlen - 1][i]);
 		}
 		/*
 		for (uint i = 0; i < outlen; i++)

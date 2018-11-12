@@ -2,7 +2,7 @@
 #include <cmath>
 #include <random>
 #include <stdexcept>
-using uint = unsigned int;
+typedef unsigned int uint;
 typedef double(*ActFunc)(double);
 
 class Network
