@@ -240,6 +240,7 @@ public:
 		}
 		*/
 	}
+	/// need edit from here
 	void BackwardPropagation(const double *const expected, const uint &expectedlen, double &norm)
 	{
 		if (expectedlen != outlen) throw std::runtime_error("Error : different length!");
